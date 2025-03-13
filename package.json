@@ -6,7 +6,9 @@
   "author": "Carter LaSalle",
   "license": "MIT",
   "scripts": {
-    "dev": "vite",
+    "dev:frontend": "vite",
+    "dev:server": "cd server && npm run dev",
+    "dev": "concurrently \"npm run dev:frontend\" \"npm run dev:server\"",
     "build": "vite build",
     "preview": "vite preview",
     "lint": "eslint . --ext .vue,.js,.jsx,.cjs,.mjs --fix --ignore-path .gitignore"
@@ -14,7 +16,8 @@
   "dependencies": {
     "@fortawesome/fontawesome-free": "^6.4.2",
     "axios": "^1.5.0",
-    "pass-js": "^2.0.2",
+    "concurrently": "^8.2.2",
+    "dotenv": "^16.4.7",
     "tesseract.js": "^4.1.1",
     "vue": "^3.3.4",
     "vue-router": "^4.2.4"

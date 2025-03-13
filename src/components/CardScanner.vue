@@ -3,6 +3,7 @@
     <div class="scanner-container">
       <video ref="videoElement" autoplay playsinline></video>
       <canvas ref="canvasElement" class="scanner-canvas"></canvas>
+      <canvas ref="debugCanvas" class="debug-canvas" v-if="showDebug"></canvas>
       
       <div class="guide-container">
         <div class="guide-frame">
@@ -23,6 +24,9 @@
       <button @click="captureManually" class="capture-btn">
         <i class="fas fa-camera"></i> Capture Manually
       </button>
+      <button v-if="isDebugMode" @click="toggleDebug" class="debug-btn">
+        {{ showDebug ? 'Hide Debug' : 'Show Debug' }}
+      </button>
     </div>
 
     <div v-if="!isCameraReady && !error" class="scanner-loading">
@@ -41,6 +45,9 @@
 import { ref, onMounted, onBeforeUnmount } from 'vue'
 import { extractCardData } from '../utils/cardProcessor'
 
+// Enable debug mode for development
+const isDebugMode = process.env.NODE_ENV === 'development';
+
 export default {
   name: 'CardScanner',
   emits: ['card-scanned'],
@@ -48,15 +55,18 @@ export default {
   setup(props, { emit }) {
     const videoElement = ref(null)
     const canvasElement = ref(null)
+    const debugCanvas = ref(null)
     const isCameraReady = ref(false)
     const isProcessing = ref(false)
     const isAligned = ref(false)
     const error = ref('')
     const statusMessage = ref('Looking for card...')
+    const showDebug = ref(false)
     
     let stream = null
     let processingInterval = null
     let alignmentTimeout = null
+    let lastDetectionTime = 0
     
     const initCamera = async () => {
       isProcessing.value = false
@@ -68,15 +78,28 @@ export default {
           stopCamera()
         }
         
-        // Request camera access with high resolution
-        stream = await navigator.mediaDevices.getUserMedia({
-          video: {
-            facingMode: 'environment',
-            width: { ideal: 1920 },
-            height: { ideal: 1080 }
-          },
-          audio: false
-        })
+        // First try to get the environment camera (rear)
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({
+            video: {
+              facingMode: { exact: 'environment' },
+              width: { ideal: 1920 },
+              height: { ideal: 1080 }
+            },
+            audio: false
+          })
+        } catch (err) {
+          console.log('Could not access environment camera, trying any camera')
+          // If that fails, try any camera
+          stream = await navigator.mediaDevices.getUserMedia({
+            video: {
+              facingMode: 'environment', // Prefer back camera
+              width: { ideal: 1920 },
+              height: { ideal: 1080 }
+            },
+            audio: false
+          })
+        }
         
         if (videoElement.value) {
           videoElement.value.srcObject = stream
@@ -121,7 +144,7 @@ export default {
         if (!isProcessing.value && isCameraReady.value) {
           processFrame()
         }
-      }, 500) // Process frames every 500ms
+      }, 300) // Process frames more frequently for better responsiveness
     }
     
     const processFrame = async () => {
@@ -144,23 +167,54 @@ export default {
         ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
         
         // Check for card alignment
-        const isCardAligned = detectCardAlignment(canvas)
+        const result = await detectCardAlignment(canvas)
         
-        if (isCardAligned && !isAligned.value) {
+        // Update debug canvas if needed
+        if (showDebug.value && debugCanvas.value) {
+          const debugCtx = debugCanvas.value.getContext('2d')
+          debugCanvas.value.width = canvas.width
+          debugCanvas.value.height = canvas.height
+          debugCtx.drawImage(canvas, 0, 0)
+          
+          if (result.corners) {
+            debugCtx.strokeStyle = 'rgba(0, 255, 0, 0.8)'
+            debugCtx.lineWidth = 3
+            
+            // Draw detected corners
+            debugCtx.beginPath()
+            debugCtx.moveTo(result.corners.topLeft.x, result.corners.topLeft.y)
+            debugCtx.lineTo(result.corners.topRight.x, result.corners.topRight.y)
+            debugCtx.lineTo(result.corners.bottomRight.x, result.corners.bottomRight.y)
+            debugCtx.lineTo(result.corners.bottomLeft.x, result.corners.bottomLeft.y)
+            debugCtx.closePath()
+            debugCtx.stroke()
+          }
+        }
+        
+        // Manage alignment detection timing
+        const now = Date.now()
+        if (result.isAligned && !isAligned.value) {
           isAligned.value = true
           statusMessage.value = 'Card detected! Capturing...'
+          lastDetectionTime = now
           
           // Wait a moment to ensure good alignment before capturing
           alignmentTimeout = setTimeout(() => {
             captureCard()
           }, 1000)
-        } else if (!isCardAligned && isAligned.value) {
-          isAligned.value = false
-          statusMessage.value = 'Looking for card...'
-          
-          if (alignmentTimeout) {
-            clearTimeout(alignmentTimeout)
-            alignmentTimeout = null
+        } else if (result.isAligned && isAligned.value) {
+          // Update last detection time
+          lastDetectionTime = now
+        } else if (!result.isAligned && isAligned.value) {
+          // Check if it's been a while since we detected alignment
+          if (now - lastDetectionTime > 500) {
+            isAligned.value = false
+            statusMessage.value = 'Looking for card...'
+            
+            if (alignmentTimeout) {
+              clearTimeout(alignmentTimeout)
+              alignmentTimeout = null
+            }
           }
         }
       } catch (err) {
@@ -170,32 +224,83 @@ export default {
       }
     }
     
-    const detectCardAlignment = (canvas) => {
-      // In a real implementation, this would use OpenCV.js for contour detection
-      // and card alignment detection. For now, we'll simulate this functionality
-      // This would be replaced with actual computer vision techniques
+    const detectCardAlignment = async (canvas) => {
+      // This would ideally use computer vision techniques
+      // For this implementation, we'll use a simplified approach
       
-      // Simplified example that would be replaced with real OpenCV.js code:
-      // 1. Convert to grayscale
-      // 2. Apply edge detection
-      // 3. Find rectangular contours
-      // 4. Check if a card-shaped contour is found and properly aligned
+      const ctx = canvas.getContext('2d')
+      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
+      const data = imageData.data
       
-      // For demo purposes, let's assume we have a 30% chance of detecting alignment
-      // This would be replaced with actual detection logic
-      return Math.random() < 0.3
+      // We'll look for a rectangular shape in the image
+      // Create a simplified edge detection
+      const edgeCanvas = document.createElement('canvas')
+      edgeCanvas.width = canvas.width
+      edgeCanvas.height = canvas.height
+      const edgeCtx = edgeCanvas.getContext('2d')
+      
+      // Draw grayscale image
+      edgeCtx.drawImage(canvas, 0, 0)
+      const edgeData = edgeCtx.getImageData(0, 0, canvas.width, canvas.height)
+      const edgePixels = edgeData.data
+      
+      // Convert to grayscale
+      for (let i = 0; i < edgePixels.length; i += 4) {
+        const gray = 0.3 * edgePixels[i] + 0.59 * edgePixels[i+1] + 0.11 * edgePixels[i+2]
+        edgePixels[i] = edgePixels[i+1] = edgePixels[i+2] = gray
+      }
+      
+      // Simplified edge detection
+      // Just check for significant changes in brightness
+      const threshold = 30
+      const guideWidth = Math.floor(canvas.width * 0.85) // Width of guide frame
+      const guideHeight = Math.floor(canvas.height * 0.55) // Height of guide frame
+      const guideLeft = Math.floor((canvas.width - guideWidth) / 2)
+      const guideTop = Math.floor((canvas.height - guideHeight) / 2)
+      
+      // For simplicity, just check if there's a card-like object in the frame
+      // This would be replaced with actual contour detection in production
+      let edgeCount = 0
+      for (let y = guideTop; y < guideTop + guideHeight; y += 10) {
+        for (let x = guideLeft; x < guideLeft + guideWidth; x += 10) {
+          const i = (y * canvas.width + x) * 4
+          const right = (y * canvas.width + Math.min(x + 10, canvas.width - 1)) * 4
+          const bottom = (Math.min(y + 10, canvas.height - 1) * canvas.width + x) * 4
+          
+          const diff1 = Math.abs(edgePixels[i] - edgePixels[right])
+          const diff2 = Math.abs(edgePixels[i] - edgePixels[bottom])
+          
+          if (diff1 > threshold || diff2 > threshold) {
+            edgeCount++
+          }
+        }
+      }
+      
+      // If enough edges are detected within the guide frame, consider it aligned
+      const isAligned = edgeCount > 100
+      
+      // Simulate corners for debugging visualization
+      const corners = {
+        topLeft: { x: guideLeft, y: guideTop },
+        topRight: { x: guideLeft + guideWidth, y: guideTop },
+        bottomRight: { x: guideLeft + guideWidth, y: guideTop + guideHeight },
+        bottomLeft: { x: guideLeft, y: guideTop + guideHeight }
+      }
+      
+      return { isAligned, corners }
     }
     
     const captureCard = async () => {
       if (!canvasElement.value) return
       
       try {
+        statusMessage.value = 'Processing image...'
+        
         // Get canvas data
         const canvas = canvasElement.value
         const imageData = canvas.toDataURL('image/jpeg', 0.95)
         
         // Process the captured image and extract card data
-        // This would use real OCR, barcode detection, etc.
         const cardData = await extractCardData(imageData)
         
         // Emit the extracted data
@@ -216,6 +321,10 @@ export default {
       }
     }
     
+    const toggleDebug = () => {
+      showDebug.value = !showDebug.value
+    }
+    
     onMounted(() => {
       initCamera()
     })
@@ -227,13 +336,17 @@ export default {
     return {
       videoElement,
       canvasElement,
+      debugCanvas,
       isCameraReady,
       isProcessing,
       isAligned,
       error,
       statusMessage,
+      isDebugMode,
+      showDebug,
       initCamera,
-      captureManually
+      captureManually,
+      toggleDebug
     }
   }
 }
@@ -274,6 +387,16 @@ video {
   width: 100%;
   height: 100%;
   display: none; /* Hide canvas visually */
+}
+
+.debug-canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 10;
+  pointer-events: none;
 }
 
 .guide-container {
@@ -373,6 +496,13 @@ video {
   display: flex;
   align-items: center;
   justify-content: center;
+  margin-bottom: 10px;
+  width: 100%;
+}
+
+.debug-btn {
+  background-color: #6c757d;
+  width: 100%;
 }
 
 .capture-btn i {
@@ -389,4 +519,4 @@ video {
   padding: 30px 20px;
   text-align: center;
 }
-</style> 
+</style>

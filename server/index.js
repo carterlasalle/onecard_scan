@@ -5,6 +5,10 @@ const fs = require('node:fs');
 const { PKPass } = require('passkit-generator');
 const multer = require('multer');
 const { v4: uuidv4 } = require('uuid');
+const dotenv = require('dotenv');
+
+// Load environment variables
+dotenv.config();
 
 // Create Express app
 const app = express();
@@ -54,7 +58,7 @@ app.post('/api/generate-pass', async (req, res) => {
         wwdr: path.join(__dirname, 'certificates/wwdr.pem'),
         signerCert: path.join(__dirname, 'certificates/signerCert.pem'),
         signerKey: path.join(__dirname, 'certificates/signerKey.pem'),
-        signerKeyPassphrase: process.env.SIGNER_KEY_PASSPHRASE || 'passphrase'
+        signerKeyPassphrase: process.env.SIGNER_KEY_PASSPHRASE
       }
     });
 
@@ -143,4 +147,4 @@ app.get('*', (req, res) => {
 // Start the server
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
-}); 
+});

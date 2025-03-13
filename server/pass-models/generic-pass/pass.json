@@ -1,18 +1,41 @@
 {
   "formatVersion": 1,
   "passTypeIdentifier": "pass.com.carterlasalle.onecardscan",
-  "serialNumber": "onecardpass001",
-  "teamIdentifier": "YOURTEAMID",
-  "organizationName": "University ID Services",
+  "serialNumber": "onecard{{CARD_ID}}",
+  "teamIdentifier": "YOURTEAMID", 
+  "organizationName": "Windward School",
   "description": "Student ID Card",
   "logoText": "Student ID",
   "foregroundColor": "rgb(255, 255, 255)",
-  "backgroundColor": "rgb(33, 150, 243)",
+  "backgroundColor": "rgb(0, 85, 184)",
   "labelColor": "rgb(255, 255, 255)",
   "generic": {
-    "headerFields": [],
-    "primaryFields": [],
-    "secondaryFields": [],
+    "headerFields": [
+      {
+        "key": "school",
+        "label": "SCHOOL",
+        "value": "WINDWARD"
+      }
+    ],
+    "primaryFields": [
+      {
+        "key": "name",
+        "label": "NAME", 
+        "value": "{{NAME}}"
+      }
+    ],
+    "secondaryFields": [
+      {
+        "key": "id",
+        "label": "ID",
+        "value": "{{CARD_ID}}"
+      },
+      {
+        "key": "year", 
+        "label": "YEAR",
+        "value": "{{YEAR}}"
+      }
+    ],
     "auxiliaryFields": [],
     "backFields": [
       {
@@ -27,8 +50,14 @@
       }
     ]
   },
-  "barcodes": [],
+  "barcodes": [
+    {
+      "message": "{{BARCODE}}",
+      "format": "PKBarcodeFormatPDF417",
+      "messageEncoding": "iso-8859-1"
+    }
+  ],
   "relevantDate": null,
   "locations": [],
   "expirationDate": null
-} 
+}
