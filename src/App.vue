@@ -5,13 +5,24 @@
     </header>
     
     <main class="main-content">
+      <div v-if="errorMessage" class="error-alert">
+        <i class="fas fa-exclamation-triangle"></i>
+        {{ errorMessage }}
+        <button @click="dismissError" class="dismiss-button">
+          <i class="fas fa-times"></i>
+        </button>
+      </div>
+      
       <CardScanner 
         v-if="currentStep === 'scan'" 
         @card-scanned="handleCardScanned" 
+        @error="handleError"
       />
       <CardPreview 
         v-else-if="currentStep === 'preview'" 
         :card-data="cardData" 
+        :is-loading="isLoading"
+        @update:card-data="updateCardData"
         @add-to-wallet="addToWallet"
         @rescan="resetScan"
       />
@@ -46,12 +57,26 @@ export default {
     const cardData = ref(null)
     const passUrl = ref('')
     const isLoading = ref(false)
+    const errorMessage = ref('')
     
     const currentYear = computed(() => new Date().getFullYear())
 
     const handleCardScanned = (data) => {
       cardData.value = data
       currentStep.value = 'preview'
+    }
+    
+    const updateCardData = (newData) => {
+      cardData.value = newData
+    }
+    
+    const handleError = (error) => {
+      errorMessage.value = error
+      console.error('Application error:', error)
+    }
+    
+    const dismissError = () => {
+      errorMessage.value = ''
     }
 
     const addToWallet = async () => {
@@ -67,15 +92,20 @@ export default {
         })
         
         if (!response.ok) {
-          throw new Error('Failed to generate pass')
+          throw new Error(`Failed to generate pass: ${response.statusText}`)
         }
         
         const data = await response.json()
+        
+        if (!data.success || !data.passUrl) {
+          throw new Error('Invalid response from server')
+        }
+        
         passUrl.value = data.passUrl
         currentStep.value = 'complete'
       } catch (error) {
         console.error('Error creating pass:', error)
-        alert('There was an error creating your Apple Wallet pass. Please try again.')
+        handleError('Failed to create Apple Wallet pass. Please try again.')
       } finally {
         isLoading.value = false
       }
@@ -84,6 +114,7 @@ export default {
     const resetScan = () => {
       cardData.value = null
       passUrl.value = ''
+      errorMessage.value = ''
       currentStep.value = 'scan'
     }
 
@@ -92,10 +123,14 @@ export default {
       cardData,
       passUrl,
       isLoading,
+      errorMessage,
       currentYear,
       handleCardScanned,
+      updateCardData,
       addToWallet,
-      resetScan
+      resetScan,
+      handleError,
+      dismissError
     }
   }
 }
@@ -137,6 +172,38 @@ body {
   flex-direction: column;
   align-items: center;
   justify-content: center;
+  position: relative;
+}
+
+.error-alert {
+  position: relative;
+  width: 100%;
+  max-width: 600px;
+  background-color: #f8d7da;
+  color: #721c24;
+  padding: 12px 36px 12px 16px;
+  margin-bottom: 16px;
+  border-radius: 4px;
+  border: 1px solid #f5c6cb;
+  display: flex;
+  align-items: center;
+}
+
+.error-alert i {
+  margin-right: 8px;
+}
+
+.dismiss-button {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  color: #721c24;
+  cursor: pointer;
+  padding: 4px;
+  font-size: 14px;
 }
 
 .app-footer {
@@ -161,6 +228,11 @@ button {
 
 button:hover {
   background-color: #0d8bf2;
+}
+
+button:disabled {
+  background-color: #b0b0b0;
+  cursor: not-allowed;
 }
 
 button.secondary {
