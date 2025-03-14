@@ -1,10 +1,17 @@
 /**
- * Advanced card processor with specialized text recognition for student IDs
+ * Simplified card processor with enhanced OCR optimization
  */
 import Tesseract from 'tesseract.js';
 
-// Enhanced preprocessing tailored for different regions
-function preprocessImage(imageData, options = {}) {
+// Default fallback values for this specific card
+const DEFAULT_NAME = 'Unknown';
+const DEFAULT_ID = '1';
+const DEFAULT_YEAR = 'Class of Unknown';
+
+/**
+ * Enhance image contrast for better OCR
+ */
+function enhanceContrast(imageData, level = 1.5) {
   return new Promise((resolve) => {
     const img = new Image();
     img.onload = () => {
@@ -15,89 +22,30 @@ function preprocessImage(imageData, options = {}) {
       canvas.height = img.height;
       ctx.drawImage(img, 0, 0);
       
-      // Get image data for processing
-      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-      const data = imageData.data;
+      const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const data = imgData.data;
       
-      // Apply different preprocessing techniques based on the region type
-      if (options.type === 'text') {
-        // High contrast processing for text
-        for (let i = 0; i < data.length; i += 4) {
-          // Convert to grayscale with custom weighting
-          const gray = 0.299 * data[i] + 0.587 * data[i+1] + 0.114 * data[i+2];
-          
-          // Apply adaptive thresholding for better text extraction
-          // Use a more aggressive threshold for text
-          const threshold = options.darkText ? 100 : 170;
-          const value = gray > threshold ? 255 : 0;
-          
-          data[i] = data[i+1] = data[i+2] = value;
-        }
-      } else if (options.type === 'barcode') {
-        // Specialized processing for barcodes
-        for (let i = 0; i < data.length; i += 4) {
-          // Convert to grayscale with emphasis on contrast
-          const gray = 0.299 * data[i] + 0.587 * data[i+1] + 0.114 * data[i+2];
-          
-          // Use multiple thresholds to ensure barcode detection
-          // This helps with different lighting conditions
-          const value = gray > 130 ? 255 : 0;
-          
-          data[i] = data[i+1] = data[i+2] = value;
-        }
-        
-        // Apply additional processing to enhance barcode features
-        // This simulates what specialized barcode readers do
-        // First pass: horizontal enhancement
-        for (let y = 0; y < canvas.height; y++) {
-          let lastValue = 0;
-          for (let x = 0; x < canvas.width; x++) {
-            const idx = (y * canvas.width + x) * 4;
-            if (x > 0) {
-              // Enhance horizontal lines by connecting nearby dark pixels
-              if (data[idx] === 0 && lastValue === 0) {
-                // Fill any small gaps
-                const leftIdx = (y * canvas.width + (x-1)) * 4;
-                if (x > 1) {
-                  const leftLeftIdx = (y * canvas.width + (x-2)) * 4;
-                  if (data[leftLeftIdx] === 0 && data[leftIdx] === 255) {
-                    data[leftIdx] = data[leftIdx+1] = data[leftIdx+2] = 0;
-                  }
-                }
-              }
-            }
-            lastValue = data[idx];
-          }
-        }
-      } else if (options.type === 'photo') {
-        // Enhance photo quality
-        for (let i = 0; i < data.length; i += 4) {
-          // Boost colors slightly
-          data[i] = Math.min(255, data[i] * 1.1);
-          data[i+1] = Math.min(255, data[i+1] * 1.1);
-          data[i+2] = Math.min(255, data[i+2] * 1.1);
-          
-          // Increase contrast a bit
-          for (let j = 0; j < 3; j++) {
-            data[i+j] = data[i+j] < 128 ? 
-              Math.max(0, data[i+j] - 10) : 
-              Math.min(255, data[i+j] + 10);
-          }
-        }
+      // Enhance contrast
+      const factor = level;
+      const intercept = 128 * (1 - factor);
+      
+      for (let i = 0; i < data.length; i += 4) {
+        data[i] = factor * data[i] + intercept;
+        data[i+1] = factor * data[i+1] + intercept;
+        data[i+2] = factor * data[i+2] + intercept;
       }
       
-      // Put processed image data back to canvas
-      ctx.putImageData(imageData, 0, 0);
-      
-      // Return processed image
+      ctx.putImageData(imgData, 0, 0);
       resolve(canvas.toDataURL('image/jpeg', 0.95));
     };
     img.src = imageData;
   });
 }
 
-// More accurate card detection based on color patterns of Windward school IDs
-async function detectCardEdges(imageData) {
+/**
+ * Threshold image to black and white
+ */
+function thresholdImage(imageData, threshold = 128) {
   return new Promise((resolve) => {
     const img = new Image();
     img.onload = () => {
@@ -108,104 +56,26 @@ async function detectCardEdges(imageData) {
       canvas.height = img.height;
       ctx.drawImage(img, 0, 0);
       
-      // Analyze color patterns to find card boundaries
-      // Specifically looking for the blue and orange/yellow colors
-      const blueThreshold = {
-        minB: 150,
-        maxR: 100,
-        maxG: 130
-      };
+      const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const data = imgData.data;
       
-      const orangeThreshold = {
-        minR: 200,
-        minG: 150,
-        maxB: 100
-      };
-      
-      let bluePoints = [];
-      let orangePoints = [];
-      
-      // Scan the image to collect blue and orange points
-      const scanStep = Math.max(1, Math.floor(canvas.width / 50)); // Adjust based on image size
-      
-      for (let x = 0; x < canvas.width; x += scanStep) {
-        for (let y = 0; y < canvas.height; y += scanStep) {
-          const pixel = ctx.getImageData(x, y, 1, 1).data;
-          
-          // Check for blue (Windward School blue header)
-          if (pixel[2] > blueThreshold.minB && 
-              pixel[0] < blueThreshold.maxR && 
-              pixel[1] < blueThreshold.maxG) {
-            bluePoints.push({x, y});
-          }
-          
-          // Check for orange/yellow (side banner)
-          if (pixel[0] > orangeThreshold.minR && 
-              pixel[1] > orangeThreshold.minG && 
-              pixel[2] < orangeThreshold.maxB) {
-            orangePoints.push({x, y});
-          }
-        }
+      for (let i = 0; i < data.length; i += 4) {
+        const avg = (data[i] + data[i+1] + data[i+2]) / 3;
+        const val = avg > threshold ? 255 : 0;
+        data[i] = data[i+1] = data[i+2] = val;
       }
       
-      // Determine card boundaries if enough colored points found
-      let cardBounds = {
-        left: 0,
-        top: 0,
-        right: canvas.width,
-        bottom: canvas.height
-      };
-      
-      if (bluePoints.length > 10 && orangePoints.length > 10) {
-        // Find extremes for blue (typically top/right of card)
-        const blueLeft = Math.min(...bluePoints.map(p => p.x));
-        const blueRight = Math.max(...bluePoints.map(p => p.x));
-        const blueTop = Math.min(...bluePoints.map(p => p.y));
-        const blueBottom = Math.max(...bluePoints.map(p => p.y));
-        
-        // Find extremes for orange (typically left side of card)
-        const orangeLeft = Math.min(...orangePoints.map(p => p.x));
-        const orangeRight = Math.max(...orangePoints.map(p => p.x));
-        const orangeTop = Math.min(...orangePoints.map(p => p.y));
-        const orangeBottom = Math.max(...orangePoints.map(p => p.y));
-        
-        // Combine to get card boundaries
-        cardBounds.left = Math.max(0, Math.min(orangeLeft, blueLeft) - 5);
-        cardBounds.right = Math.min(canvas.width, Math.max(orangeRight, blueRight) + 5);
-        cardBounds.top = Math.max(0, Math.min(orangeTop, blueTop) - 5);
-        cardBounds.bottom = Math.min(canvas.height, Math.max(orangeBottom, blueBottom) + 5);
-      }
-      
-      // Calculate width and height
-      cardBounds.width = cardBounds.right - cardBounds.left;
-      cardBounds.height = cardBounds.bottom - cardBounds.top;
-      
-      // Create a cropped card image
-      const cardCanvas = document.createElement('canvas');
-      const cardCtx = cardCanvas.getContext('2d');
-      
-      cardCanvas.width = cardBounds.width;
-      cardCanvas.height = cardBounds.height;
-      
-      // Extract just the card region
-      cardCtx.drawImage(
-        canvas, 
-        cardBounds.left, cardBounds.top, cardBounds.width, cardBounds.height,
-        0, 0, cardBounds.width, cardBounds.height
-      );
-      
-      // Return the cropped card image and boundaries
-      resolve({
-        cardImage: cardCanvas.toDataURL('image/jpeg', 0.95),
-        bounds: cardBounds
-      });
+      ctx.putImageData(imgData, 0, 0);
+      resolve(canvas.toDataURL('image/jpeg', 0.95));
     };
     img.src = imageData;
   });
 }
 
-// Precise region extraction based on Windward School ID layout
-async function extractCardRegions(cardImage) {
+/**
+ * Extract predefined regions from image
+ */
+function extractRegions(imageData) {
   return new Promise((resolve) => {
     const img = new Image();
     img.onload = () => {
@@ -216,348 +86,335 @@ async function extractCardRegions(cardImage) {
       canvas.height = img.height;
       ctx.drawImage(img, 0, 0);
       
-      // Precise Windward School ID card layout
-      // These regions are calibrated based on the example images
-      const regions = {
-        // Photo region - left side of card
+      // Define regions for Windward School ID cards
+      // These measurements are based on the example image
+      // and are percentages of the overall card dimensions
+      const regionDefs = {
+        // Left area - photo
         photo: {
-          x: Math.floor(img.width * 0.03),
-          y: Math.floor(img.height * 0.20),
-          width: Math.floor(img.width * 0.35),
-          height: Math.floor(img.height * 0.50)
+          x: 0.2,       // 20% from left
+          y: 0.2,       // 20% from top
+          width: 0.3,   // 30% of card width
+          height: 0.5   // 50% of card height
         },
-        
-        // Name region - centered, lower portion
+        // Bottom area with name
         name: {
-          x: Math.floor(img.width * 0.05),
-          y: Math.floor(img.height * 0.72),
-          width: Math.floor(img.width * 0.90),
-          height: Math.floor(img.height * 0.08)
+          x: 0.2,       // 20% from left
+          y: 0.7,       // 70% from top
+          width: 0.6,   // 60% of card width
+          height: 0.08  // 8% of card height
         },
-        
-        // ID number - lower left
-        idNumber: {
-          x: Math.floor(img.width * 0.05),
-          y: Math.floor(img.height * 0.80),
-          width: Math.floor(img.width * 0.25),
-          height: Math.floor(img.height * 0.08)
+        // Bottom area with ID
+        id: {
+          x: 0.2,       // 20% from left
+          y: 0.78,      // 78% from top
+          width: 0.3,   // 30% of card width
+          height: 0.08  // 8% of card height
         },
-        
-        // Class year - lower center
-        classYear: {
-          x: Math.floor(img.width * 0.05),
-          y: Math.floor(img.height * 0.88),
-          width: Math.floor(img.width * 0.40),
-          height: Math.floor(img.height * 0.08)
+        // Bottom area with class year
+        year: {
+          x: 0.2,       // 20% from left
+          y: 0.86,      // 86% from top
+          width: 0.4,   // 40% of card width
+          height: 0.08  // 8% of card height
         },
-        
-        // Barcode region - right side
+        // Right area with barcode
         barcode: {
-          x: Math.floor(img.width * 0.60),
-          y: Math.floor(img.height * 0.70),
-          width: Math.floor(img.width * 0.35),
-          height: Math.floor(img.height * 0.20)
-        },
-        
-        // Orange sidebar with year
-        sidebar: {
-          x: 0,
-          y: 0,
-          width: Math.floor(img.width * 0.15),
-          height: img.height
-        },
-        
-        // School name/logo in blue header
-        header: {
-          x: Math.floor(img.width * 0.40),
-          y: 0,
-          width: Math.floor(img.width * 0.60),
-          height: Math.floor(img.height * 0.30)
+          x: 0.6,       // 60% from left
+          y: 0.65,      // 65% from top
+          width: 0.35,  // 35% of card width
+          height: 0.3   // 30% of card height
         }
       };
       
-      // Extract each region
-      const extractedRegions = {};
+      const regions = {};
       
-      const extractRegion = (region, name) => {
+      // Extract each region
+      for (const [name, region] of Object.entries(regionDefs)) {
+        const x = Math.floor(canvas.width * region.x);
+        const y = Math.floor(canvas.height * region.y);
+        const width = Math.floor(canvas.width * region.width);
+        const height = Math.floor(canvas.height * region.height);
+        
         const regionCanvas = document.createElement('canvas');
-        regionCanvas.width = region.width;
-        regionCanvas.height = region.height;
+        regionCanvas.width = width;
+        regionCanvas.height = height;
         const regionCtx = regionCanvas.getContext('2d');
         
         regionCtx.drawImage(
           canvas,
-          region.x, region.y, region.width, region.height,
-          0, 0, region.width, region.height
+          x, y, width, height,
+          0, 0, width, height
         );
         
-        extractedRegions[name] = regionCanvas.toDataURL('image/jpeg', 0.95);
-      };
+        regions[name] = regionCanvas.toDataURL('image/jpeg', 0.95);
+      }
       
-      // Extract all regions
-      Object.entries(regions).forEach(([name, region]) => {
-        extractRegion(region, name);
-      });
+      // Also add the full card
+      regions.fullCard = imageData;
       
-      // Also include the full card image
-      extractedRegions.fullCard = cardImage;
-      
-      resolve(extractedRegions);
+      resolve(regions);
     };
-    img.src = cardImage;
+    img.src = imageData;
   });
 }
 
-// Enhanced OCR with specialized settings for different text types
-async function performOCR(imageData, options = {}) {
+/**
+ * Recognize text with optimal settings for each field type
+ */
+async function recognizeText(imageData, fieldType) {
   try {
-    // Apply appropriate preprocessing based on content type
-    const processedImage = await preprocessImage(imageData, {
-      type: options.type || 'text',
-      darkText: options.darkText || false
-    });
+    // Apply specific preprocessing based on field type
+    let processedImage;
     
-    // Configure OCR options based on content type
-    const ocrConfig = {
-      lang: 'eng',
-      tessedit_char_whitelist: options.whitelist || undefined
-    };
-    
-    // Add OCR customization for specific content types
-    if (options.type === 'digit') {
-      ocrConfig.tessedit_char_whitelist = '0123456789';
-      ocrConfig.tessedit_pageseg_mode = '7'; // Treat as single line
-    } else if (options.type === 'name') {
-      ocrConfig.tessedit_pageseg_mode = '7'; // Treat as single line
-      // Allow only text characters in names
-      ocrConfig.tessedit_char_whitelist = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz -\'';
+    if (fieldType === 'name') {
+      // For name, use higher contrast
+      processedImage = await enhanceContrast(imageData, 1.7);
+    } else if (fieldType === 'id') {
+      // For ID, use binary thresholding to isolate digits
+      const contrastImage = await enhanceContrast(imageData, 1.8);
+      processedImage = await thresholdImage(contrastImage, 150);
+    } else if (fieldType === 'year') {
+      // For class year, use moderate contrast
+      processedImage = await enhanceContrast(imageData, 1.5);
+    } else if (fieldType === 'barcode') {
+      // For barcode, use binary thresholding with lower threshold
+      const contrastImage = await enhanceContrast(imageData, 2.0);
+      processedImage = await thresholdImage(contrastImage, 120);
+    } else {
+      // Default enhancement
+      processedImage = await enhanceContrast(imageData, 1.4);
     }
     
-    // Perform OCR
-    const { data } = await Tesseract.recognize(processedImage, 'eng', ocrConfig);
+    // Configure Tesseract options based on field type
+    const config = {};
     
-    // Post-process the recognized text based on content type
-    let text = data.text.trim();
+    if (fieldType === 'id' || fieldType === 'barcode') {
+      config.tessedit_char_whitelist = '0123456789';
+    } else if (fieldType === 'name') {
+      // Allow letters, spaces, and some punctuation for names
+      config.tessedit_char_whitelist = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz -\'';
+    }
     
-    if (options.type === 'name') {
-      // Clean up name: remove extra spaces, correct capitalization
+    // Special PSM modes for different field types
+    if (fieldType === 'id') {
+      config.tessedit_pageseg_mode = '7'; // Treat as single line of text
+    } else if (fieldType === 'barcode') {
+      config.tessedit_pageseg_mode = '6'; // Assume a single uniform block of text
+    } else if (fieldType === 'name') {
+      config.tessedit_pageseg_mode = '7'; // Treat as single line of text
+    }
+    
+    // Perform OCR with configured settings
+    const result = await Tesseract.recognize(processedImage, 'eng', {
+      ...config,
+      logger: m => console.log(`OCR ${fieldType}: ${m.status}`)
+    });
+    
+    // Clean and normalize the recognized text
+    let text = result.data.text.trim();
+    
+    // Apply field-specific post-processing
+    if (fieldType === 'name') {
+      // Remove extra spaces, fix capitalization
       text = text.replace(/\s+/g, ' ').trim();
       
-      // Proper capitalization for names
+      // Proper capitalization for names (first letter of each word uppercase)
       text = text.replace(/\w\S*/g, (txt) => {
         return txt.charAt(0).toUpperCase() + txt.substr(1).toLowerCase();
       });
-    } else if (options.type === 'digit') {
-      // Extract numeric digits only
-      text = text.replace(/[^0-9]/g, '');
-    } else if (options.type === 'classYear') {
-      // Look for "Class of YYYY" pattern
-      const yearPattern = /class\s+of\s+(\d{4})/i;
-      const match = text.match(yearPattern);
       
-      if (match) {
-        text = `Class of ${match[1]}`;
+      // If name is nonsense, use default
+      if (!/^[A-Z][a-z]+ [A-Z][a-z]+$/.test(text)) {
+        console.log(`Name '${text}' appears invalid, using default`);
+        text = DEFAULT_NAME;
+      }
+    } else if (fieldType === 'id') {
+      // Extract only digits
+      const digits = text.replace(/\D/g, '');
+      
+      // Validate ID format
+      if (/^\d{5,8}$/.test(digits)) {
+        text = digits;
       } else {
-        // If pattern not found, look for just 4 digits (year)
-        const yearDigits = text.match(/\d{4}/);
-        if (yearDigits) {
-          text = `Class of ${yearDigits[0]}`;
+        console.log(`ID '${digits}' appears invalid, using default`);
+        text = DEFAULT_ID;
+      }
+    } else if (fieldType === 'year') {
+      // Look for class year pattern
+      const yearMatch = text.match(/class\s+of\s+(\d{4})/i);
+      if (yearMatch) {
+        text = `Class of ${yearMatch[1]}`;
+      } else {
+        // Look for just a 4-digit year
+        const digitMatch = text.match(/\d{4}/);
+        if (digitMatch) {
+          text = `Class of ${digitMatch[0]}`;
+        } else {
+          console.log(`Year '${text}' appears invalid, using default`);
+          text = DEFAULT_YEAR;
         }
+      }
+    } else if (fieldType === 'barcode') {
+      // Clean up barcode to just digits
+      const digits = text.replace(/\D/g, '');
+      if (digits.length > 4) {
+        text = digits;
+      } else {
+        // If barcode extraction failed, use ID
+        text = DEFAULT_ID;
       }
     }
     
     return text;
   } catch (error) {
-    console.error('OCR Error:', error);
+    console.error(`OCR Error (${fieldType}):`, error);
+    
+    // Return defaults on error
+    if (fieldType === 'name') return DEFAULT_NAME;
+    if (fieldType === 'id') return DEFAULT_ID;
+    if (fieldType === 'year') return DEFAULT_YEAR;
+    if (fieldType === 'barcode') return DEFAULT_ID;
+    
     return '';
   }
 }
 
-// Specialized barcode extraction with multiple techniques
-async function extractBarcode(barcodeImage) {
-  try {
-    // First approach: Use specialized barcode preprocessing
-    const processedImage = await preprocessImage(barcodeImage, { 
-      type: 'barcode' 
-    });
-    
-    // Run OCR configured for barcode/digits
-    const { data } = await Tesseract.recognize(
-      processedImage,
-      'eng',
-      {
-        tessedit_char_whitelist: '0123456789',
-        tessedit_pageseg_mode: '6' // Assume uniform block of text
-      }
-    );
-    
-    // Extract numeric digits
-    let barcode = data.text.replace(/[^0-9]/g, '');
-    
-    // Check if we got a reasonable result (at least 5 digits)
-    if (barcode.length >= 5) {
-      return barcode;
-    }
-    
-    // Second approach: Try with different preprocessing settings
-    const processedImage2 = await preprocessImage(barcodeImage, {
-      type: 'text',
-      darkText: true
-    });
-    
-    const { data: data2 } = await Tesseract.recognize(
-      processedImage2,
-      'eng',
-      {
-        tessedit_char_whitelist: '0123456789',
-        tessedit_pageseg_mode: '6'
-      }
-    );
-    
-    barcode = data2.text.replace(/[^0-9]/g, '');
-    
-    if (barcode.length >= 5) {
-      return barcode;
-    }
-    
-    // Third approach: Use the original image
-    const { data: data3 } = await Tesseract.recognize(
-      barcodeImage,
-      'eng',
-      {
-        tessedit_char_whitelist: '0123456789',
-        tessedit_pageseg_mode: '6'
-      }
-    );
-    
-    barcode = data3.text.replace(/[^0-9]/g, '');
-    
-    // If all approaches fail, return empty string
-    return barcode;
-  } catch (error) {
-    console.error('Barcode extraction error:', error);
-    return '';
-  }
-}
-
-// Generate a PDF417-style barcode image 
-function generateBarcodeImage(barcodeValue) {
+/**
+ * Generate a simple barcode image
+ */
+function generateBarcodeImage(value) {
   const canvas = document.createElement('canvas');
   const ctx = canvas.getContext('2d');
   canvas.width = 320;
-  canvas.height = 120;
+  canvas.height = 100;
   
   // Draw white background
   ctx.fillStyle = 'white';
   ctx.fillRect(0, 0, canvas.width, canvas.height);
   
-  // Draw PDF417-style barcode
+  // Draw barcode lines
   ctx.fillStyle = 'black';
   
-  // Draw complex barcode pattern
-  const digits = String(barcodeValue).split('');
-  const rowHeight = 8;
-  const startX = 40;
-  let x, y;
+  // Convert value to digits
+  const digits = String(value).padStart(6, '0').split('').map(d => parseInt(d, 10));
   
-  // Draw data pattern in multiple rows (PDF417 style)
-  for (let row = 0; row < 8; row++) {
-    y = 15 + (row * rowHeight);
-    x = startX;
+  // Draw barcode pattern
+  const startX = 20;
+  const barHeight = 70;
+  let x = startX;
+  
+  // Draw start marker
+  ctx.fillRect(x, 15, 2, barHeight);
+  x += 4;
+  
+  // Draw digit patterns
+  for (const digit of digits) {
+    // Create unique pattern for each digit
+    const barCount = 4 + (digit % 3);
     
-    // Start pattern for each row
-    ctx.fillRect(x, y, 2, rowHeight - 1);
-    x += 4;
-    
-    // Draw pattern based on digits and row
-    for (let i = 0; i < digits.length; i++) {
-      const digit = parseInt(digits[i], 10);
-      
-      // Create a unique pattern for each digit
-      for (let j = 0; j < 4; j++) {
-        const width = ((digit + j + row) % 4) + 1;
-        
-        if ((digit + j + row) % 3 !== 1) {
-          ctx.fillRect(x, y, width, rowHeight - 1);
-        }
-        
-        x += width + 1;
-      }
+    for (let i = 0; i < barCount; i++) {
+      const barWidth = 1 + (i % 3);
+      ctx.fillRect(x, 15, barWidth, barHeight);
+      x += barWidth + 2;
     }
     
-    // End pattern for each row
-    ctx.fillRect(x, y, 2, rowHeight - 1);
+    // Space between digits
+    x += 4;
   }
   
-  // Add text below barcode
-  ctx.font = '14px monospace';
+  // Draw end marker
+  ctx.fillRect(x, 15, 2, barHeight);
+  
+  // Add text
+  ctx.font = '16px monospace';
   ctx.fillStyle = 'black';
   ctx.textAlign = 'center';
-  ctx.fillText(barcodeValue, canvas.width / 2, 105);
+  ctx.fillText(value, canvas.width / 2, 95);
   
   return canvas.toDataURL('image/png');
 }
 
-// Main function to extract all card data
-export async function extractCardData(imageData) {
+/**
+ * Main function to extract all card data
+ */
+export async function extractCardData(imageData, updateProgress) {
   try {
-    console.log('Starting card data extraction');
+    // Step 1: Extract regions directly (skip edge detection for simplicity)
+    updateProgress?.("Extracting card regions...");
+    const regions = await extractRegions(imageData);
     
-    // Step 1: Detect card edges and normalize
-    const { cardImage } = await detectCardEdges(imageData);
-    console.log('Card edges detected');
+    // Step 2: Process each region with optimal settings
     
-    // Step 2: Extract regions from the normalized card
-    const regions = await extractCardRegions(cardImage);
-    console.log('Card regions extracted');
-    
-    // Step 3: Process each region with specialized settings
-    
-    // Extract name with specialized name processing
-    const name = await performOCR(regions.name, { type: 'name' });
+    // Extract name
+    updateProgress?.("Recognizing name...");
+    const name = await recognizeText(regions.name, 'name');
     console.log('Name extracted:', name);
     
-    // Extract ID number with digit-specific processing
-    const cardId = await performOCR(regions.idNumber, { type: 'digit' });
+    // Extract ID number
+    updateProgress?.("Recognizing ID number...");
+    const cardId = await recognizeText(regions.id, 'id');
     console.log('ID extracted:', cardId);
     
-    // Extract class year with pattern recognition
-    const year = await performOCR(regions.classYear, { type: 'classYear' });
+    // Extract class year
+    updateProgress?.("Recognizing class year...");
+    const year = await recognizeText(regions.year, 'year');
     console.log('Year extracted:', year);
     
-    // Extract barcode with specialized barcode processing
-    const barcode = await extractBarcode(regions.barcode);
+    // Extract barcode
+    updateProgress?.("Recognizing barcode...");
+    const barcode = await recognizeText(regions.barcode, 'barcode');
     console.log('Barcode extracted:', barcode);
     
-    // Generate barcode image for display
+    // Generate barcode image
+    updateProgress?.("Generating barcode image...");
     const barcodeImage = generateBarcodeImage(barcode || cardId);
     
-    // Extract and enhance photo
-    const enhancedPhoto = await preprocessImage(regions.photo, {
-      type: 'photo'
-    });
-    
-    // Return the extracted data
-    return {
+    // Prepare final data
+    const extractedData = {
       name,
       cardId,
       year,
-      photo: enhancedPhoto || regions.photo,
-      barcode,
-      barcodeImage
+      photo: regions.photo,
+      barcode: barcode || cardId,
+      barcodeImage,
+      confidence: {
+        name: name === DEFAULT_NAME ? 'low' : 'high',
+        cardId: cardId === DEFAULT_ID ? 'low' : 'high',
+        year: year === DEFAULT_YEAR ? 'low' : 'high'
+      },
+      // Only add suggestions for fields with low confidence
+      suggestedName: name === DEFAULT_NAME ? DEFAULT_NAME : null,
+      suggestedId: cardId === DEFAULT_ID ? DEFAULT_ID : null,
+      suggestedYear: year === DEFAULT_YEAR ? DEFAULT_YEAR : null
     };
+    
+    updateProgress?.("Extraction complete!");
+    return extractedData;
+    
   } catch (error) {
     console.error('Error extracting card data:', error);
+    updateProgress?.("Error in extraction, using fallback data");
+    
+    // Return fallback data on error
     return {
-      name: '',
-      cardId: '',
-      year: '',
+      name: DEFAULT_NAME,
+      cardId: DEFAULT_ID,
+      year: DEFAULT_YEAR,
       photo: imageData,
-      barcode: '',
-      barcodeImage: ''
+      barcode: DEFAULT_ID,
+      barcodeImage: generateBarcodeImage(DEFAULT_ID),
+      confidence: {
+        name: 'low',
+        cardId: 'low',
+        year: 'low'
+      },
+      suggestedName: DEFAULT_NAME,
+      suggestedId: DEFAULT_ID,
+      suggestedYear: DEFAULT_YEAR
     };
   }
 }
 
-// Export the barcode generator for use in other components
+// Export functions
 export { generateBarcodeImage };

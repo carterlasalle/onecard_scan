@@ -3,6 +3,13 @@
     <h2 class="preview-title">Card Preview</h2>
     
     <div v-if="cardData" class="preview-content">
+      <div class="preview-header">
+        <div class="confidence-indicator" :class="overallConfidence">
+          <i class="fas" :class="confidenceIcon"></i>
+          <span>{{ confidenceMessage }}</span>
+        </div>
+      </div>
+      
       <div class="preview-image-container">
         <img :src="cardData.photo" alt="Student Photo" class="student-photo" />
       </div>
@@ -14,7 +21,15 @@
             {{ cardData.name }}
             <i v-if="needsCorrection('name')" class="fas fa-exclamation-circle warning-icon"></i>
           </span>
-          <input v-else type="text" v-model="editableData.name" class="info-input" />
+          <div v-else class="edit-field">
+            <input type="text" v-model="editableData.name" class="info-input" />
+            <span v-if="cardData.suggestedName" class="suggestion">
+              Suggested: {{ cardData.suggestedName }}
+              <button @click="useSuggestion('name')" class="use-suggestion-btn">
+                <i class="fas fa-check"></i> Use
+              </button>
+            </span>
+          </div>
         </div>
         
         <div class="info-item">
@@ -23,7 +38,15 @@
             {{ cardData.cardId }}
             <i v-if="needsCorrection('cardId')" class="fas fa-exclamation-circle warning-icon"></i>
           </span>
-          <input v-else type="text" v-model="editableData.cardId" class="info-input" pattern="[0-9]*" inputmode="numeric" />
+          <div v-else class="edit-field">
+            <input type="text" v-model="editableData.cardId" class="info-input" pattern="[0-9]*" inputmode="numeric" />
+            <span v-if="cardData.suggestedId" class="suggestion">
+              Suggested: {{ cardData.suggestedId }}
+              <button @click="useSuggestion('cardId')" class="use-suggestion-btn">
+                <i class="fas fa-check"></i> Use
+              </button>
+            </span>
+          </div>
         </div>
         
         <div class="info-item">
@@ -32,20 +55,28 @@
             {{ cardData.year }}
             <i v-if="needsCorrection('year')" class="fas fa-exclamation-circle warning-icon"></i>
           </span>
-          <input v-else type="text" v-model="editableData.year" class="info-input" />
+          <div v-else class="edit-field">
+            <input type="text" v-model="editableData.year" class="info-input" />
+            <span v-if="cardData.suggestedYear" class="suggestion">
+              Suggested: {{ cardData.suggestedYear }}
+              <button @click="useSuggestion('year')" class="use-suggestion-btn">
+                <i class="fas fa-check"></i> Use
+              </button>
+            </span>
+          </div>
         </div>
       </div>
       
       <div v-if="showEditSuggestion && !isEditing" class="edit-suggestion">
         <p>
           <i class="fas fa-info-circle"></i>
-          Some information may not be correct. Click "Edit Information" to fix it.
+          Some information may need correction. Click "Edit Information" to fix it.
         </p>
       </div>
       
       <div class="preview-barcode">
         <img :src="cardData.barcodeImage" alt="Barcode" class="barcode-image" />
-        <p class="barcode-text">{{ cardData.barcode }}</p>
+        <p class="barcode-text">{{ cardData.barcode || cardData.cardId }}</p>
       </div>
       
       <div class="preview-actions">
@@ -132,6 +163,14 @@ export default {
     const needsCorrection = (field) => {
       if (!props.cardData) return false;
       
+      // If we have confidence scores, use them
+      if (props.cardData.confidence) {
+        if (props.cardData.confidence[field] === 'low') {
+          return true;
+        }
+      }
+      
+      // Fallback to regex validation
       switch (field) {
         case 'name':
           return !isValidName(props.cardData.name);
@@ -151,6 +190,45 @@ export default {
              needsCorrection('year');
     });
     
+    // Calculate overall confidence level
+    const overallConfidence = computed(() => {
+      if (!props.cardData) return 'unknown';
+      
+      const fields = ['name', 'cardId', 'year'];
+      const numErrors = fields.filter(field => needsCorrection(field)).length;
+      
+      if (numErrors === 0) return 'high';
+      if (numErrors === 1) return 'medium';
+      return 'low';
+    });
+    
+    // Confidence icon
+    const confidenceIcon = computed(() => {
+      switch (overallConfidence.value) {
+        case 'high': return 'fa-check-circle';
+        case 'medium': return 'fa-info-circle';
+        case 'low': return 'fa-exclamation-triangle';
+        default: return 'fa-question-circle';
+      }
+    });
+    
+    // Confidence message
+    const confidenceMessage = computed(() => {
+      switch (overallConfidence.value) {
+        case 'high': return 'Data looks good!';
+        case 'medium': return 'Some fields may need review';
+        case 'low': return 'Please review the extracted data';
+        default: return 'Scan quality unknown';
+      }
+    });
+    
+    // Use suggested value
+    const useSuggestion = (field) => {
+      if (props.cardData[`suggested${field.charAt(0).toUpperCase() + field.slice(1)}`]) {
+        editableData[field] = props.cardData[`suggested${field.charAt(0).toUpperCase() + field.slice(1)}`];
+      }
+    };
+    
     // Start editing - copy data to editable form
     const toggleEdit = () => {
       if (!isEditing.value) {
@@ -159,15 +237,17 @@ export default {
         editableData.cardId = props.cardData.cardId;
         editableData.year = props.cardData.year;
         
-        // Fix obvious issues automatically
-        if (needsCorrection('name')) {
-          editableData.name = 'Carter LaSalle';
+        // Apply any suggested corrections automatically
+        if (needsCorrection('name') && props.cardData.suggestedName) {
+          editableData.name = props.cardData.suggestedName;
         }
-        if (needsCorrection('cardId') || !editableData.cardId) {
-          editableData.cardId = '025352';
+        
+        if (needsCorrection('cardId') && props.cardData.suggestedId) {
+          editableData.cardId = props.cardData.suggestedId;
         }
-        if (needsCorrection('year')) {
-          editableData.year = 'Class of 2025';
+        
+        if (needsCorrection('year') && props.cardData.suggestedYear) {
+          editableData.year = props.cardData.suggestedYear;
         }
       }
       isEditing.value = !isEditing.value;
@@ -210,6 +290,13 @@ export default {
         updatedData.barcodeImage = generateBarcodeImage(editableData.cardId);
       }
       
+      // Update confidence
+      updatedData.confidence = {
+        name: 'high',
+        cardId: 'high',
+        year: 'high'
+      };
+      
       // Emit update event
       emit('update:cardData', updatedData);
       
@@ -232,8 +319,12 @@ export default {
       editableData,
       needsCorrection,
       showEditSuggestion,
+      overallConfidence,
+      confidenceIcon,
+      confidenceMessage,
       toggleEdit,
-      saveEdits
+      saveEdits,
+      useSuggestion
     };
   }
 }
@@ -253,6 +344,34 @@ export default {
 
 .preview-content {
   position: relative;
+}
+
+.preview-header {
+  margin-bottom: 15px;
+}
+
+.confidence-indicator {
+  padding: 8px 12px;
+  border-radius: 4px;
+  font-size: 0.9rem;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.confidence-indicator.high {
+  background-color: #d4edda;
+  color: #155724;
+}
+
+.confidence-indicator.medium {
+  background-color: #fff3cd;
+  color: #856404;
+}
+
+.confidence-indicator.low {
+  background-color: #f8d7da;
+  color: #721c24;
 }
 
 .preview-image-container {
@@ -303,12 +422,36 @@ export default {
   color: #dc3545;
 }
 
-.info-input {
+.edit-field {
   flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.info-input {
   padding: 8px;
   border: 1px solid var(--primary-color);
   border-radius: 4px;
   font-size: 1rem;
+  margin-bottom: 4px;
+}
+
+.suggestion {
+  font-size: 0.8rem;
+  color: #6c757d;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.use-suggestion-btn {
+  background-color: #28a745;
+  color: white;
+  border: none;
+  border-radius: 3px;
+  padding: 2px 6px;
+  font-size: 0.7rem;
+  cursor: pointer;
 }
 
 .edit-suggestion {
