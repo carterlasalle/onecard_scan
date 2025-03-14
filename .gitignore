@@ -44,3 +44,7 @@ build
 # Apple Wallet pass specific
 *.pkpass
 certificates/
+
+wwdr.cer
+pass.cer
+CertificateSigningRequest.certSigningRequest

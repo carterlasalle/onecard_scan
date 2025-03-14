@@ -2,7 +2,7 @@
   "formatVersion": 1,
   "passTypeIdentifier": "pass.com.carterlasalle.onecardscan",
   "serialNumber": "onecard{{CARD_ID}}",
-  "teamIdentifier": "YOURTEAMID", 
+  "teamIdentifier": "V75C6SBVRR", 
   "organizationName": "Windward School",
   "description": "Student ID Card",
   "logoText": "Student ID",
